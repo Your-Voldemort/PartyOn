@@ -25,8 +25,8 @@
 
 1.  **Clone the Repository:**
     ```bash
-    git clone [https://github.com/YOUR-USERNAME/LAN-Audio-Streamer.git](https://github.com/YOUR-USERNAME/LAN-Audio-Streamer.git)
-    cd LAN-Audio-Streamer
+    git clone https://github.com/Mayurkoli8/PartyOn.git
+    cd partyon
     ```
 2.  **Install Dependencies:**
     ```bash
@@ -82,7 +82,7 @@ Use the standard command or the auto-restart script:
     requirements.txt
     README.md
     LICENSE
-    ```
+```
 
 ---
 
