@@ -4,8 +4,10 @@ HTTP server module for the Audio Streamer.
 Serves the client UI and status endpoints.
 """
 
+import os
 import socket
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 from flask import Flask, send_from_directory, jsonify
@@ -16,6 +18,9 @@ from .connection_manager import ConnectionManager
 
 # Server start time for uptime calculation
 _start_time: Optional[datetime] = None
+
+# Get the project root directory (parent of src/)
+PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 
 
 def get_local_ip() -> str:
@@ -59,12 +64,12 @@ def create_app(
     @app.route('/')
     def index():
         """Serve the client HTML page."""
-        return send_from_directory('.', 'client.html')
+        return send_from_directory(PROJECT_ROOT, 'client.html')
     
     @app.route('/static/js/<path:filename>')
     def serve_js(filename):
         """Serve JavaScript files."""
-        return send_from_directory('static/js', filename)
+        return send_from_directory(PROJECT_ROOT / 'static' / 'js', filename)
     
     @app.route('/status')
     def status():
