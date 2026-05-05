@@ -127,3 +127,5 @@ Reach out if you’d like to collaborate or contribute.
 
 ### 💬 Want to improve this project?
 Open an issue or start a discussion — PRs welcome ⚡
+
+https://www.star-history.com/?repos=Mayurkoli8%2FPartyOn&type=date&legend=top-left
