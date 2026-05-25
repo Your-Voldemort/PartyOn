@@ -65,13 +65,16 @@ class AudioWebSocketServer:
         """Main loop for capturing and broadcasting audio."""
         self.logger.info("Starting audio broadcast loop")
         
+        loop = asyncio.get_event_loop()
+        
         while self.is_running:
-            data = self.audio_capture.read_block()
+            # Run blocking audio capture in thread pool to avoid blocking event loop
+            data = await loop.run_in_executor(None, self.audio_capture.read_block)
             
             if data:
                 await self.connection_manager.broadcast(data)
             
-            # Let event loop breathe
+            # Minimal yield to let event loop process other tasks
             await asyncio.sleep(0)
     
     async def start(self, host: str = "0.0.0.0") -> None:

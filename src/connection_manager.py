@@ -4,6 +4,7 @@ Connection manager for the Audio Streamer server.
 Tracks connected clients and handles lifecycle events.
 """
 
+import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -36,6 +37,7 @@ class ConnectionManager:
         self.clients: Dict[str, ClientInfo] = {}
         self.logger = logger
         self.total_served: int = 0
+        self._lock = asyncio.Lock()  # Protect concurrent access to clients dict
     
     def add_client(self, websocket: websockets.WebSocketServerProtocol) -> str:
         """
@@ -110,7 +112,11 @@ class ConnectionManager:
         """
         failed_clients = []
         
-        for client_id, client_info in self.clients.items():
+        async with self._lock:
+            # Create snapshot of clients dict to avoid RuntimeError from concurrent modification
+            clients_snapshot = list(self.clients.items())
+        
+        for client_id, client_info in clients_snapshot:
             try:
                 await client_info.websocket.send(data)
                 client_info.packets_sent += 1
@@ -120,8 +126,11 @@ class ConnectionManager:
                 failed_clients.append(client_id)
         
         # Remove failed clients
-        for client_id in failed_clients:
-            self.remove_client(client_id)
+        async with self._lock:
+            for client_id in failed_clients:
+                if client_id in self.clients:
+                    del self.clients[client_id]
+                    self.logger.info(f"Client disconnected: {client_id}")
     
     async def close_all(self, reason: str = "Server shutting down") -> None:
         """
@@ -132,10 +141,12 @@ class ConnectionManager:
         """
         self.logger.info(f"Closing all connections: {reason}")
         
-        for client_id, client_info in list(self.clients.items()):
+        async with self._lock:
+            clients_snapshot = list(self.clients.items())
+            self.clients.clear()
+        
+        for client_id, client_info in clients_snapshot:
             try:
                 await client_info.websocket.close(1001, reason)
             except Exception as e:
                 self.logger.debug(f"Error closing {client_id}: {e}")
-        
-        self.clients.clear()
