@@ -205,6 +205,11 @@ export class AudioEngine {
                 this.playTime = this.context.currentTime + 0.10;
             }
             
+            // Disconnect source after playback completes to prevent memory leak
+            source.addEventListener('ended', () => {
+                source.disconnect();
+            });
+            
             source.start(this.playTime);
             this.playTime += buffer.duration;
         }
