@@ -12,6 +12,7 @@ from typing import Optional
 
 from flask import Flask, send_from_directory, jsonify
 
+from .audio_capture import AudioCapture
 from .config import ServerConfig
 from .connection_manager import ConnectionManager
 
@@ -43,7 +44,7 @@ def get_local_ip() -> str:
 def create_app(
     connection_manager: ConnectionManager,
     config: ServerConfig,
-    audio_device_info: Optional[dict] = None
+    audio_capture: Optional[AudioCapture] = None
 ) -> Flask:
     """
     Create Flask app with routes.
@@ -76,7 +77,13 @@ def create_app(
         """Return JSON with server health metrics."""
         uptime = (datetime.now() - _start_time).total_seconds() if _start_time else 0
         client_stats = connection_manager.get_stats()
-        
+        audio_info = audio_capture.get_device_info() if audio_capture else {
+            "device": "Unknown",
+            "sample_rate": config.sample_rate,
+            "channels": config.channels,
+            "is_running": False
+        }
+
         return jsonify({
             "status": "running",
             "uptime_seconds": int(uptime),
@@ -84,11 +91,7 @@ def create_app(
                 "connected": client_stats["connected"],
                 "total_served": client_stats["total_served"]
             },
-            "audio": audio_device_info or {
-                "device": "Unknown",
-                "sample_rate": config.sample_rate,
-                "channels": config.channels
-            },
+            "audio": audio_info,
             "server": {
                 "http_port": config.http_port,
                 "ws_port": config.ws_port
@@ -102,7 +105,8 @@ def create_app(
             "ws_port": config.ws_port,
             "sample_rate": config.sample_rate,
             "channels": config.channels,
-            "host": get_local_ip()
+            "host": get_local_ip(),
+            "max_reconnect_attempts": config.max_reconnect_attempts
         })
     
     return app

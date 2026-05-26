@@ -5,10 +5,9 @@ Handles device discovery and audio capture via WASAPI loopback or Stereo Mix.
 """
 
 import logging
-from typing import Optional, List, Tuple
+from typing import Optional, List
 
 import sounddevice as sd
-import numpy as np
 
 from .config import ServerConfig
 
@@ -50,21 +49,22 @@ class AudioCapture:
                 self.is_running = True
                 return True
         
-        # Fall back to Stereo Mix
+        # Fall back to Stereo Mix / PulseAudio monitor sources
         self.logger.info("WASAPI loopback failed, trying Stereo Mix fallback")
         stereo_candidates = [
             i for i, d in enumerate(devices)
-            if "stereo" in d['name'].lower() or d['max_input_channels'] > 0
+            if "stereo" in d['name'].lower() or "monitor" in d['name'].lower()
         ]
-        
+
         if self._try_stereo_mix(stereo_candidates):
             self.is_running = True
             return True
-        
+
         self.logger.error(
             "No audio source found. Enable Stereo Mix or WASAPI loopback "
             "in Windows sound settings."
         )
+        self.stop()
         return False
     
     def read_block(self) -> Optional[bytes]:
@@ -78,7 +78,9 @@ class AudioCapture:
             return None
         
         try:
-            frames, _ = self.stream.read(self.config.block_size)
+            frames, overflowed = self.stream.read(self.config.block_size)
+            if overflowed:
+                self.logger.warning("Audio buffer overflow: some samples were dropped")
             return frames.tobytes()
         except Exception as e:
             self.logger.error(f"Error reading audio block: {e}")
@@ -121,15 +123,16 @@ class AudioCapture:
     
     def _try_wasapi(self, idx: int) -> bool:
         """Try to open WASAPI loopback on the given device index."""
+        stream = None
         try:
             self.logger.debug(f"Trying WASAPI loopback on device {idx}")
-            
+
             try:
                 ws = sd.WasapiSettings(loopback=True)
             except AttributeError:
                 ws = None
-            
-            self.stream = sd.InputStream(
+
+            stream = sd.InputStream(
                 device=idx,
                 samplerate=self.config.sample_rate,
                 channels=self.config.channels,
@@ -137,40 +140,55 @@ class AudioCapture:
                 dtype="int16",
                 extra_settings=ws
             )
-            self.stream.start()
-            
+            stream.start()
+
             device_info = sd.query_devices(idx)
             self.device_name = device_info['name']
             self.logger.info(f"WASAPI loopback success on device {idx}: {self.device_name}")
+            self.stream = stream
             return True
-            
+
         except Exception as e:
             self.logger.debug(f"WASAPI failed on device {idx}: {e}")
+            if stream is not None:
+                try:
+                    stream.stop()
+                    stream.close()
+                except Exception:
+                    pass
             return False
     
     def _try_stereo_mix(self, candidates: List[int]) -> bool:
         """Try to open Stereo Mix on candidate devices."""
         for idx in candidates:
+            stream = None
             try:
                 self.logger.debug(f"Trying Stereo Mix on device {idx}")
-                
-                self.stream = sd.InputStream(
+
+                stream = sd.InputStream(
                     device=idx,
                     samplerate=self.config.sample_rate,
                     channels=self.config.channels,
                     blocksize=self.config.block_size,
                     dtype="int16"
                 )
-                self.stream.start()
-                
+                stream.start()
+
                 device_info = sd.query_devices(idx)
                 self.device_name = device_info['name']
                 self.logger.info(f"Stereo Mix success on device {idx}: {self.device_name}")
+                self.stream = stream
                 return True
-                
+
             except Exception as e:
                 self.logger.debug(f"Stereo Mix failed on device {idx}: {e}")
-        
+                if stream is not None:
+                    try:
+                        stream.stop()
+                        stream.close()
+                    except Exception:
+                        pass
+
         return False
     
     def get_device_info(self) -> dict:

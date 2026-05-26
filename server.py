@@ -30,15 +30,16 @@ def setup_logger(log_level: str) -> logging.Logger:
     """
     logger = logging.getLogger("audio_streamer")
     logger.setLevel(getattr(logging, log_level.upper(), logging.INFO))
-    
-    handler = logging.StreamHandler()
-    formatter = logging.Formatter(
-        "%(asctime)s | %(name)s | %(levelname)s | %(message)s",
-        datefmt="%Y-%m-%dT%H:%M:%S"
-    )
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
-    
+
+    if not logger.handlers:
+        handler = logging.StreamHandler()
+        formatter = logging.Formatter(
+            "%(asctime)s | %(name)s | %(levelname)s | %(message)s",
+            datefmt="%Y-%m-%dT%H:%M:%S"
+        )
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+
     return logger
 
 
@@ -67,8 +68,8 @@ class AudioStreamerServer:
             self._loop.add_signal_handler(signal.SIGINT, self._signal_handler)
             self._loop.add_signal_handler(signal.SIGTERM, self._signal_handler)
         else:
-            signal.signal(signal.SIGINT, lambda s, f: self._signal_handler())
-            signal.signal(signal.SIGTERM, lambda s, f: self._signal_handler())
+            signal.signal(signal.SIGINT, lambda s, f: self._loop.call_soon_threadsafe(self._signal_handler))
+            signal.signal(signal.SIGTERM, lambda s, f: self._loop.call_soon_threadsafe(self._signal_handler))
     
     def _signal_handler(self) -> None:
         """Handle shutdown signals."""
@@ -92,7 +93,10 @@ class AudioStreamerServer:
         self.audio_capture.stop()
         
         self.logger.info("Shutdown complete")
-        sys.exit(0)
+        # Cancel all pending tasks so asyncio.run() exits cleanly
+        for task in asyncio.all_tasks():
+            if task is not asyncio.current_task():
+                task.cancel()
     
     def _start_http_server(self) -> None:
         """Start the HTTP server in a separate thread."""
@@ -100,7 +104,7 @@ class AudioStreamerServer:
         app = create_app(
             self.connection_manager,
             self.config,
-            self.audio_capture.get_device_info()
+            self.audio_capture
         )
         self.logger.info(f"HTTP server: http://{host}:{self.config.http_port}")
         app.run(host="0.0.0.0", port=self.config.http_port, threaded=True)
