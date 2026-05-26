@@ -33,7 +33,7 @@ export class ConnectionHandler {
         
         this.ws = null;
         this.reconnectAttempts = 0;
-        this.maxReconnectAttempts = 10;
+        this.maxReconnectAttempts = options.maxReconnectAttempts || 10;
         this.baseDelay = 1000;
         this.maxDelay = 30000;
         this.reconnectTimer = null;
@@ -53,10 +53,19 @@ export class ConnectionHandler {
      * Establish WebSocket connection.
      */
     connect() {
-        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-            return;
+        if (this.ws) {
+            if (this.ws.readyState === WebSocket.OPEN) {
+                return;
+            }
+            // Detach handlers before closing so onclose doesn't schedule another reconnect
+            this.ws.onclose = null;
+            this.ws.onerror = null;
+            if (this.ws.readyState !== WebSocket.CLOSED) {
+                this.ws.close();
+            }
+            this.ws = null;
         }
-        
+
         this._setStatus(ConnectionStatus.CONNECTING);
         
         try {

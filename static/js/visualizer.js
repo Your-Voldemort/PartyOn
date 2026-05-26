@@ -77,9 +77,13 @@ export class AudioVisualizer {
                 this.ctx.fillStyle = this.barColor;
             }
             
-            // Draw rounded bar
+            // Draw rounded bar with fallback for older browsers
             this.ctx.beginPath();
-            this.ctx.roundRect(x, y, barWidth, barHeight, 3);
+            if (typeof this.ctx.roundRect === 'function') {
+                this.ctx.roundRect(x, y, barWidth, barHeight, 3);
+            } else {
+                this.ctx.rect(x, y, barWidth, barHeight);
+            }
             this.ctx.fill();
         }
     }

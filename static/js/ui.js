@@ -31,7 +31,8 @@ export class UIController {
      * @param {Object} config - Configuration from server.
      */
     initialize(config) {
-        const wsUrl = `ws://${config.host || location.hostname}:${config.ws_port || 8765}`;
+        const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${wsProtocol}//${config.host || location.hostname}:${config.ws_port || 8765}`;
         
         // Initialize stats collector
         this.statsCollector = new StatsCollector();
@@ -39,7 +40,8 @@ export class UIController {
         // Initialize audio engine
         this.audioEngine = new AudioEngine({
             sampleRate: config.sample_rate || 44100,
-            channels: config.channels || 2
+            channels: config.channels || 2,
+            onUnderrun: () => this.statsCollector?.recordUnderrun()
         });
         
         // Initialize visualizer if canvas exists
@@ -50,6 +52,7 @@ export class UIController {
         // Initialize connection handler
         this.connectionHandler = new ConnectionHandler({
             wsUrl: wsUrl,
+            maxReconnectAttempts: config.max_reconnect_attempts || 10,
             onData: (data) => this._handleAudioData(data),
             onStatusChange: (status, details) => this._handleStatusChange(status, details)
         });
@@ -84,11 +87,18 @@ export class UIController {
             this.elements.packetsPerSecond.textContent = stats.packetsPerSecond;
         }
         if (this.elements.latency) {
-            this.elements.latency.textContent = `${stats.latencyMs}ms`;
+            // latencyMs is not yet measured server-side; show placeholder until available
+            this.elements.latency.textContent = stats.latencyMs > 0 ? `${stats.latencyMs}ms` : '--';
         }
         if (this.elements.quality) {
-            this.elements.quality.textContent = stats.quality;
+            this.elements.quality.textContent = stats.quality.toUpperCase();
             this.elements.quality.className = `quality-${stats.quality}`;
+        }
+        if (this.elements.totalPackets) {
+            this.elements.totalPackets.textContent = stats.packetsReceived;
+        }
+        if (this.elements.underruns) {
+            this.elements.underruns.textContent = stats.bufferUnderruns;
         }
     }
     
@@ -168,11 +178,28 @@ export class UIController {
      * @private
      */
     _handlePlay() {
+        const status = this.connectionHandler?.status;
+
         if (this.isPlaying) {
-            this.audioEngine?.resume();
+            if (status === ConnectionStatus.CONNECTED) {
+                // Treat play as resume from pause when already streaming
+                this.audioEngine?.resume();
+                this.updateStatus('Streaming\u2026');
+                return;
+            }
+
+            if (status === ConnectionStatus.FAILED || status === ConnectionStatus.DISCONNECTED) {
+                // Allow retrying a failed/dropped connection without a full reinit
+                this.connectionHandler.reconnectAttempts = 0;
+                this.connectionHandler.connect();
+                return;
+            }
+
+            // Currently connecting or reconnecting — ignore duplicate clicks
             return;
         }
-        
+
+        // Fresh start
         if (!this.audioEngine?.initialize()) {
             this.showError('Audio not supported', [
                 'Try using Chrome or Firefox',
@@ -180,7 +207,7 @@ export class UIController {
             ]);
             return;
         }
-        
+
         this.connectionHandler?.connect();
         this.isPlaying = true;
     }
@@ -218,7 +245,7 @@ export class UIController {
         this.audioEngine.setMuted(isMuted);
         
         if (this.elements.muteBtn) {
-            this.elements.muteBtn.textContent = isMuted ? 'Unmute' : 'Mute';
+            this.elements.muteBtn.textContent = isMuted ? 'UNMUTE' : 'MUTE';
         }
     }
     
@@ -315,6 +342,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         packetsPerSecond: document.getElementById('pps'),
         latency: document.getElementById('latency'),
         quality: document.getElementById('quality'),
+        totalPackets: document.getElementById('totalPackets'),
+        underruns: document.getElementById('underruns'),
         errorContainer: document.getElementById('errorContainer')
     };
     

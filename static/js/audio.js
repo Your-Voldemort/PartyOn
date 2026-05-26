@@ -19,7 +19,8 @@ export class AudioEngine {
         this.sampleRate = options.sampleRate || 44100;
         this.channels = options.channels || 2;
         this.onVisualizationData = options.onVisualizationData || (() => {});
-        
+        this.onUnderrun = options.onUnderrun || (() => {});
+
         this.context = null;
         this.analyser = null;
         this.gainNode = null;
@@ -40,20 +41,24 @@ export class AudioEngine {
     initialize() {
         try {
             this.context = new AudioContext({ sampleRate: this.sampleRate });
-            
-            // Create gain node for volume control
+
+            // Create gain node for volume control, honoring any mute set before init
             this.gainNode = this.context.createGain();
-            this.gainNode.gain.value = this.volume;
+            this.gainNode.gain.value = this.isMuted ? 0 : this.volume;
             this.gainNode.connect(this.context.destination);
-            
+
             // Create analyser for visualization
             this.analyser = this.context.createAnalyser();
             this.analyser.fftSize = 256;
             this.analyser.connect(this.gainNode);
-            
+
+            // Some browsers (especially Safari) start AudioContext suspended
+            // even after a user gesture; explicitly resuming ensures audio flows.
+            this.context.resume();
+
             this.isInitialized = true;
             this._startPump();
-            
+
             return true;
         } catch (error) {
             console.error('Failed to initialize audio context:', error);
@@ -88,13 +93,19 @@ export class AudioEngine {
      */
     pause() {
         this.isPaused = true;
+        if (this.context && this.context.state === 'running') {
+            this.context.suspend();
+        }
     }
-    
+
     /**
      * Resume playback from buffer.
      */
     resume() {
         this.isPaused = false;
+        if (this.context && this.context.state === 'suspended') {
+            this.context.resume();
+        }
     }
     
     /**
@@ -124,27 +135,21 @@ export class AudioEngine {
      */
     processAudioData(data) {
         if (!this.isInitialized) return;
-        
+
         const pcm = new Int16Array(data);
-        
-        // Buffer management during pause
-        if (this.isPaused) {
-            const bytesPerSecond = this.sampleRate * this.channels * 2;
-            const maxBufferBytes = this.maxBufferSeconds * bytesPerSecond;
-            
-            // Calculate current buffer size
-            let currentSize = 0;
-            for (const item of this.queue) {
-                currentSize += item.byteLength;
-            }
-            
-            // Discard oldest if exceeding limit
-            while (currentSize + data.byteLength > maxBufferBytes && this.queue.length > 0) {
-                const removed = this.queue.shift();
-                currentSize -= removed.byteLength;
-            }
+        const bytesPerSecond = this.sampleRate * this.channels * 2;
+        const maxBufferBytes = this.maxBufferSeconds * bytesPerSecond;
+
+        // Apply buffer cap regardless of pause state to prevent unbounded growth
+        let currentSize = 0;
+        for (const item of this.queue) {
+            currentSize += item.byteLength;
         }
-        
+        while (currentSize + data.byteLength > maxBufferBytes && this.queue.length > 0) {
+            const removed = this.queue.shift();
+            currentSize -= removed.byteLength;
+        }
+
         this.queue.push(pcm);
     }
     
@@ -202,6 +207,7 @@ export class AudioEngine {
             source.connect(this.analyser);
             
             if (this.playTime < this.context.currentTime) {
+                this.onUnderrun();
                 this.playTime = this.context.currentTime + 0.10;
             }
             
